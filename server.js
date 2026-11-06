@@ -5,26 +5,18 @@ const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: false } });
+const io = new Server(server);
 const PORT = process.env.PORT || 3000;
-
-app.get("/", (_req, res) =>
-  res.sendFile(__dirname + "/index.html")
-);
-app.get("/manifest.json", (_req, res) =>
-  res.sendFile(__dirname + "/manifest.json")
-);
-app.get("/sw.js", (_req, res) =>
-  res.sendFile(__dirname + "/sw.js")
-);
+app.use(express.static("public"));
+app.get("/", (_req, res) => res.sendFile(__dirname + "/index.html"));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-// In-memory rooms: restarting the server clears all games and location data.
 const rooms = new Map();
 const makeCode = () => crypto.randomBytes(3).toString("hex").toUpperCase();
-const cleanName = (s) => String(s || "").trim().slice(0, 20);
-const publicPlayers = (room) => [...room.players.values()].map(p => ({
-  id: p.id, name: p.name, role: p.role === "hunter" ? "hunter" : "player",
+const cleanName = s => String(s || "").trim().slice(0, 20);
+const publicPlayers = room => [...room.players.values()].map(p => ({
+  id: p.id, name: p.name,
+  role: p.role === "hunter" ? "hunter" : "player",
   caught: !!p.caught, connected: !!p.connected
 }));
 
@@ -43,13 +35,25 @@ function sendRoomState(code) {
 
 function assignRoles(room) {
   const players = [...room.players.values()];
-  if (players.length < 3) throw new Error("At least 3 players are required.");
+  const hunterCount = Math.max(1, Math.min(5, Number(room.settings.hunterCount) || 1));
+  if (players.length < hunterCount + 2) {
+    throw new Error(`At least ${hunterCount + 2} players are required for ${hunterCount} Hunter(s) and one Spy.`);
+  }
   players.forEach(p => { p.role = "seeker"; p.caught = false; p.location = null; });
-  const hunter = players[Math.floor(Math.random() * players.length)];
-  hunter.role = "hunter";
-  const candidates = players.filter(p => p.id !== hunter.id);
-  const spy = candidates[Math.floor(Math.random() * candidates.length)];
-  spy.role = "spy"; // Spy is secretly aligned with the Hunter.
+  // Randomly choose the Hunter team, then one secret Spy from the remaining players.
+  const shuffled = [...players].sort(() => Math.random() - 0.5);
+  shuffled.slice(0, hunterCount).forEach(p => { p.role = "hunter"; });
+  const spy = shuffled.slice(hunterCount)[Math.floor(Math.random() * (players.length - hunterCount))];
+  spy.role = "spy";
+}
+
+function sendHunterLocations(room) {
+  const hunters = [...room.players.values()].filter(p => p.role === "hunter");
+  const targets = [...room.players.values()]
+    .filter(p => ["hunter", "seeker", "spy"].includes(p.role) && !p.caught && p.location)
+    .map(p => ({ id: p.id, name: p.name, role: p.role, ...p.location }));
+  // Only Hunter-team sockets receive this feed. It includes each Hunter's own marker.
+  for (const hunter of hunters) io.to(hunter.id).emit("hunter-locations", targets);
 }
 
 io.on("connection", socket => {
@@ -60,13 +64,10 @@ io.on("connection", socket => {
     do { code = makeCode(); } while (rooms.has(code));
     const room = {
       code, hostId: socket.id, status: "lobby",
-      settings: { maxPlayers: 60, durationMinutes: 15 },
+      settings: { maxPlayers: 60, durationMinutes: 15, hunterCount: 1 },
       players: new Map()
     };
-    room.players.set(socket.id, {
-      id: socket.id, name: playerName, role: "host", connected: true,
-      caught: false, location: null
-    });
+    room.players.set(socket.id, { id: socket.id, name: playerName, role: "host", connected: true, caught: false, location: null });
     rooms.set(code, room);
     socket.join(code);
     cb({ code });
@@ -81,19 +82,26 @@ io.on("connection", socket => {
     if (!room) return cb({ error: "Room not found. Check the code." });
     if (room.status !== "lobby") return cb({ error: "This game has already started." });
     if (room.players.size >= room.settings.maxPlayers) return cb({ error: "This room is full." });
-    room.players.set(socket.id, {
-      id: socket.id, name: playerName, role: "seeker", connected: true,
-      caught: false, location: null
-    });
+    room.players.set(socket.id, { id: socket.id, name: playerName, role: "seeker", connected: true, caught: false, location: null });
     socket.join(code);
     cb({ code });
     sendRoomState(code);
   });
 
+  socket.on("set-hunter-count", ({ code, count }, cb = () => {}) => {
+    const room = rooms.get(String(code || "").toUpperCase());
+    if (!room || room.hostId !== socket.id) return cb({ error: "Only the host can change this setting." });
+    if (room.status !== "lobby") return cb({ error: "Hunter count can only be changed in the lobby." });
+    count = Number(count);
+    if (!Number.isInteger(count) || count < 1 || count > 5) return cb({ error: "Choose between 1 and 5 Hunters." });
+    room.settings.hunterCount = count;
+    sendRoomState(room.code);
+    cb({ ok: true });
+  });
+
   socket.on("start-game", ({ code }, cb = () => {}) => {
     const room = rooms.get(String(code || "").toUpperCase());
     if (!room || room.hostId !== socket.id) return cb({ error: "Only the host can start." });
-    if (room.players.size < 3) return cb({ error: "Add at least 3 players before starting." });
     try { assignRoles(room); room.status = "active"; }
     catch (e) { return cb({ error: e.message }); }
     sendRoomState(room.code);
@@ -105,23 +113,12 @@ io.on("connection", socket => {
     const player = room && room.players.get(socket.id);
     if (!room || room.status !== "active" || !player || player.caught) return cb({ error: "Game is not active." });
     lat = Number(lat); lng = Number(lng); accuracy = Number(accuracy);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-      return cb({ error: "Invalid location." });
-    }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return cb({ error: "Invalid location." });
     player.location = { lat, lng, accuracy: Number.isFinite(accuracy) ? accuracy : null, updatedAt: Date.now() };
-
-    // Only the Hunter receives live seeker/spy coordinates. Other seekers never receive the map feed.
-    const hunter = [...room.players.values()].find(p => p.role === "hunter");
-    if (hunter) {
-      const targets = [...room.players.values()]
-        .filter(p => (p.role === "seeker" || p.role === "spy") && !p.caught && p.location)
-        .map(p => ({ id: p.id, name: p.name, role: p.role === "spy" ? "spy" : "seeker", ...p.location }));
-      io.to(hunter.id).emit("hunter-locations", targets);
-    }
-
-    // Secret Spy can send a private location/intel ping to the Hunter.
-    if (player.role === "spy" && hunter) {
-      io.to(hunter.id).emit("spy-intel", { message: `${player.name} (your Spy) checked in.`, at: Date.now() });
+    sendHunterLocations(room);
+    if (player.role === "spy") {
+      const hunters = [...room.players.values()].filter(p => p.role === "hunter");
+      for (const hunter of hunters) io.to(hunter.id).emit("spy-intel", { message: `${player.name} (your Spy) checked in.`, at: Date.now() });
     }
     cb({ ok: true });
   });
@@ -130,26 +127,20 @@ io.on("connection", socket => {
     const room = rooms.get(String(code || "").toUpperCase());
     const hunter = room && room.players.get(socket.id);
     const target = room && room.players.get(String(targetId));
-    if (!room || !hunter || hunter.role !== "hunter" || !target ||
-        !["seeker", "spy"].includes(target.role) || target.caught) {
-      return cb({ error: "That player cannot be marked caught." });
-    }
+    if (!room || !hunter || hunter.role !== "hunter" || !target || !["seeker", "spy"].includes(target.role) || target.caught) return cb({ error: "That player cannot be marked caught." });
     target.caught = true;
     target.location = null;
     sendRoomState(room.code);
+    sendHunterLocations(room);
     cb({ ok: true });
     const remaining = [...room.players.values()].filter(p => ["seeker", "spy"].includes(p.role) && !p.caught);
-    if (!remaining.length) {
-      room.status = "finished";
-      sendRoomState(room.code);
-    }
+    if (!remaining.length) { room.status = "finished"; for (const p of room.players.values()) p.location = null; sendRoomState(room.code); }
   });
 
   socket.on("end-game", ({ code }, cb = () => {}) => {
     const room = rooms.get(String(code || "").toUpperCase());
     if (!room || room.hostId !== socket.id) return cb({ error: "Only the host can end the game." });
     room.status = "finished";
-    // Clear stored coordinates when the round ends.
     for (const p of room.players.values()) p.location = null;
     sendRoomState(room.code);
     cb({ ok: true });
@@ -160,9 +151,9 @@ io.on("connection", socket => {
       const player = room.players.get(socket.id);
       if (player) {
         player.connected = false;
-        // Keep the seat during a round; remove it from a lobby.
         if (room.status === "lobby") room.players.delete(socket.id);
         sendRoomState(room.code);
+        if (room.status === "active") sendHunterLocations(room);
       }
     }
   });
