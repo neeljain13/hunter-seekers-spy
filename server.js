@@ -8,7 +8,15 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: false } });
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static("public"));
+app.get("/", (_req, res) =>
+  res.sendFile(__dirname + "/index.html")
+);
+app.get("/manifest.json", (_req, res) =>
+  res.sendFile(__dirname + "/manifest.json")
+);
+app.get("/sw.js", (_req, res) =>
+  res.sendFile(__dirname + "/sw.js")
+);
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 // In-memory rooms: restarting the server clears all games and location data.
