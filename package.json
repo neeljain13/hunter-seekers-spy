@@ -1,0 +1,17 @@
+{
+  "name": "hunter-seekers-spy",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Real-world multiplayer Hunter vs Seekers vs Spy game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

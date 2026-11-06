@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101827">
+<meta name="description" content="Real-world multiplayer Hunter vs Seekers vs Spy game">
+<link rel="manifest" href="/manifest.json">
+<title>Hunter vs Seekers vs Spy</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+:root{color-scheme:dark;--bg:#101827;--panel:#192638;--line:#2d4058;--text:#f4f7fb;--muted:#a9b7c9;--accent:#67a7ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#1c3048,var(--bg) 55%);color:var(--text);font:16px system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+main{width:min(920px,100%);margin:auto;padding:22px 16px 50px}.brand{text-align:center;margin:8px 0 22px}.brand h1{font-size:clamp(25px,6vw,38px);margin:0}.brand p{color:var(--muted);margin:7px 0}
+.panel{background:rgba(25,38,56,.96);border:1px solid var(--line);border-radius:18px;padding:18px;margin:14px 0;box-shadow:0 12px 35px #0003}
+h2{font-size:20px;margin:0 0 13px}label{display:block;color:var(--muted);font-size:14px;margin:12px 0 6px}
+input,select,button{font:inherit;border-radius:11px;padding:12px;border:1px solid var(--line);width:100%;background:#0e1928;color:var(--text)}
+button{background:#2467bd;border:0;font-weight:700;cursor:pointer;margin-top:10px}button.secondary{background:#31445d}button.danger{background:#9c3434}button:disabled{opacity:.45}
+.row{display:flex;gap:10px}.row>*{flex:1;min-width:0}.hidden{display:none!important}.muted{color:var(--muted)}.code{font-size:28px;font-weight:800;letter-spacing:5px;text-align:center;padding:8px}
+ul{padding-left:20px}.player{padding:8px 10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}.pill{font-size:12px;color:#dceaff;background:#28466a;border-radius:20px;padding:3px 8px}
+.role{font-size:25px;font-weight:800;margin:4px 0}.map-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.map-tools button{width:auto;margin:0;padding:9px 13px}.map-tools .active{outline:2px solid #8bc1ff;background:#174f8e}
+#map{height:min(58vh,520px);min-height:300px;border-radius:14px;overflow:hidden;background:#26384b}.target{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}.target button{width:auto;margin:0;padding:8px 10px;background:#8c3434}.notice{padding:10px;border-radius:10px;background:#213d5b;color:#d9eaff;margin:10px 0;font-size:14px}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#172638;color:#fff}.leaflet-control-attribution{font-size:10px}
+@media(max-width:520px){main{padding:14px 12px 35px}.panel{padding:15px}.row{flex-direction:column;gap:0}#map{height:52vh}}
+</style>
+</head>
+<body>
+<main>
+  <header class="brand"><h1>🕵️ Hunter vs Seekers vs Spy</h1><p>Move in the real world. Track, hide and catch.</p></header>
+
+  <section id="home" class="panel">
+    <h2>Create a game</h2>
+    <label for="nameCreate">Your name</label><input id="nameCreate" maxlength="22" placeholder="Enter your name">
+    <label for="hunterCount">Number of Hunters</label>
+    <select id="hunterCount"><option value="1">1 Hunter</option><option value="2">2 Hunters</option><option value="3">3 Hunters</option><option value="4">4 Hunters</option><option value="5">5 Hunters</option></select>
+    <button id="createBtn">Create room</button>
+    <div style="height:16px"></div><h2>Join a game</h2>
+    <label for="nameJoin">Your name</label><input id="nameJoin" maxlength="22" placeholder="Enter your name">
+    <label for="roomInput">Room code</label><input id="roomInput" maxlength="6" placeholder="e.g. A1B2C3" autocapitalize="characters">
+    <button id="joinBtn" class="secondary">Join room</button>
+    <p id="homeError" class="muted" role="status"></p>
+  </section>
+
+  <section id="lobby" class="panel hidden">
+    <h2>Game lobby</h2><div class="muted">Share this room code with your friends.</div><div id="roomCode" class="code"></div>
+    <button id="copyBtn" class="secondary">Copy room code</button>
+    <div id="hostSettings" class="hidden"><label for="lobbyHunterCount">Hunters (host setting)</label><select id="lobbyHunterCount"><option value="1">1 Hunter</option><option value="2">2 Hunters</option><option value="3">3 Hunters</option><option value="4">4 Hunters</option><option value="5">5 Hunters</option></select></div>
+    <h2 style="margin-top:18px">Players <span id="playerCount" class="muted"></span></h2><div id="players"></div>
+    <button id="startBtn">Start game</button><p id="lobbyHint" class="muted">At least 3 players are needed for one Hunter.</p>
+    <button id="leaveBtn" class="secondary">Leave room</button>
+  </section>
+
+  <section id="game" class="panel hidden">
+    <h2>Your secret role</h2><div id="roleName" class="role"></div><p id="roleDescription" class="muted"></p>
+    <div id="gpsNotice" class="notice">Share your GPS location to play. Your location is sent only to the Hunter team.</div>
+    <div class="row"><button id="shareBtn">Share my location</button><button id="stopBtn" class="secondary">Stop sharing</button></div>
+    <div id="hunterPanel" class="hidden">
+      <h2 style="margin-top:20px">Hunter team map</h2>
+      <div class="map-tools">
+        <button id="normalBtn" class="active">Normal</button><button id="satelliteBtn" class="secondary">Satellite</button><button id="myLocationBtn" class="secondary">My location</button>
+      </div>
+      <div id="map"></div>
+      <p class="muted">Blue: you · Purple: teammates · Green: Seekers · Gold: Spy</p>
+      <h2 style="margin-top:18px">Players to catch</h2><div id="targets" class="muted">Waiting for GPS locations…</div>
+      <div id="intel" class="notice hidden"></div>
+    </div>
+    <div id="seekerMessage" class="notice hidden">You are a Seeker. Keep moving and avoid the Hunters. Your GPS position is shared with the Hunter team only.</div>
+    <div id="finishedMessage" class="notice hidden">The game has ended.</div>
+    <button id="endBtn" class="danger hidden">End game (host)</button>
+  </section>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+(() => {
+  const socket = io();
+  const $ = id => document.getElementById(id);
+  let roomCode = "", myRole = "", isHost = false, watchId = null;
+  let map = null, ownPosition = null, ownMarker = null, markerLayer = null, mapReady = false;
+  let currentHunters = [], currentTargets = [], mapMode = "normal";
+
+  function show(id) { $(id).classList.remove("hidden"); }
+  function hide(id) { $(id).classList.add("hidden"); }
+  function message(text) { $("homeError").textContent = text || ""; }
+  function callWithAck(event, payload) {
+    return new Promise(resolve => socket.emit(event, payload, result => resolve(result || {ok:false,error:"No response from server."})));
+  }
+  $("createBtn").onclick = async () => {
+    message("");
+    const result = await callWithAck("create-room", {name:$("nameCreate").value, hunterCount:$("hunterCount").value});
+    if (!result.ok) message(result.error);
+  };
+  $("joinBtn").onclick = async () => {
+    message("");
+    const result = await callWithAck("join-room", {name:$("nameJoin").value, code:$("roomInput").value});
+    if (!result.ok) message(result.error);
+  };
+  $("copyBtn").onclick = async () => {
+    try { await navigator.clipboard.writeText(roomCode); $("copyBtn").textContent = "Copied!"; }
+    catch { $("copyBtn").textContent = "Room code: " + roomCode; }
+  };
+  $("lobbyHunterCount").onchange = () => socket.emit("set-hunter-count", {count:$("lobbyHunterCount").value});
+  $("startBtn").onclick = () => socket.emit("start-game");
+  $("endBtn").onclick = () => socket.emit("end-game");
+  $("leaveBtn").onclick = () => { stopGPS(); location.reload(); };
+  $("shareBtn").onclick = startGPS;
+  $("stopBtn").onclick = stopGPS;
+  $("normalBtn").onclick = () => setMapMode("normal");
+  $("satelliteBtn").onclick = () => setMapMode("satellite");
+  $("myLocationBtn").onclick = () => {
+    if (map && ownPosition) map.setView([ownPosition.lat, ownPosition.lng], 17);
+    else $("gpsNotice").textContent = "Share your GPS location first.";
+  };
+
+  function startGPS() {
+    if (!navigator.geolocation) { $("gpsNotice").textContent = "GPS is not supported by this browser."; return; }
+    if (location.protocol !== "https:" && location.hostname !== "localhost") {
+      $("gpsNotice").textContent = "GPS needs a secure HTTPS connection. Open your deployed Render URL.";
+      return;
+    }
+    if (watchId !== null) return;
+    $("gpsNotice").textContent = "Waiting for GPS permission and location…";
+    watchId = navigator.geolocation.watchPosition(pos => {
+      ownPosition = {lat:pos.coords.latitude, lng:pos.coords.longitude};
+      socket.emit("location-update", ownPosition);
+      $("gpsNotice").textContent = "GPS is sharing with the Hunter team. Keep this page open during the game.";
+      if (myRole === "hunter") renderMap();
+    }, err => {
+      $("gpsNotice").textContent = "GPS error: " + err.message + ". Check browser location permission.";
+    }, {enableHighAccuracy:true, maximumAge:3000, timeout:20000});
+  }
+  function stopGPS() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    $("gpsNotice").textContent = "GPS sharing stopped.";
+  }
+  function setMapMode(mode) {
+    mapMode = mode;
+    $("normalBtn").classList.toggle("active", mode === "normal");
+    $("satelliteBtn").classList.toggle("active", mode === "satellite");
+    if (!map) return;
+    if (mapMode === "normal") {
+      if (map.hasLayer(satelliteLayer)) map.removeLayer(satelliteLayer);
+      normalLayer.addTo(map);
+    } else {
+      if (map.hasLayer(normalLayer)) map.removeLayer(normalLayer);
+      satelliteLayer.addTo(map);
+    }
+  }
+  const normalLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  });
+  const satelliteLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom:19, attribution:'Tiles &copy; Esri and its imagery providers'
+  });
+  function ensureMap() {
+    if (map) return;
+    map = L.map("map", {zoomControl:true}).setView([20.5937,78.9629], 5);
+    normalLayer.addTo(map);
+    markerLayer = L.layerGroup().addTo(map);
+    mapReady = true;
+    setTimeout(() => map.invalidateSize(), 150);
+  }
+  function markerIcon(color, label) {
+    return L.divIcon({
+      className:"",
+      html:`<div style="background:${color};border:2px solid white;border-radius:18px;color:white;font-size:11px;font-weight:800;padding:5px 8px;box-shadow:0 2px 7px #0008;white-space:nowrap">${label}</div>`,
+      iconSize:null, iconAnchor:[20,14]
+    });
+  }
+  function renderMap() {
+    if (myRole !== "hunter") return;
+    ensureMap();
+    markerLayer.clearLayers();
+    const bounds = [];
+    if (ownPosition) {
+      L.marker([ownPosition.lat,ownPosition.lng],{icon:markerIcon("#1769e0","YOU")}).addTo(markerLayer);
+      bounds.push([ownPosition.lat,ownPosition.lng]);
+    }
+    currentHunters.forEach(p => {
+      if (p.id === socket.id) return;
+      L.marker([p.lat,p.lng],{icon:markerIcon("#8154d8","HUNTER · "+p.name)}).addTo(markerLayer);
+      bounds.push([p.lat,p.lng]);
+    });
+    currentTargets.forEach(p => {
+      const isSpy = p.role === "spy";
+      L.marker([p.lat,p.lng],{icon:markerIcon(isSpy?"#d49b20":"#229b68",(isSpy?"SPY · ":"SEEKER · ")+p.name)}).addTo(markerLayer);
+      bounds.push([p.lat,p.lng]);
+    });
+    if (bounds.length > 1 && !ownPosition) map.fitBounds(bounds,{padding:[25,25],maxZoom:16});
+    else if (ownPosition && !map._userMoved) map.setView([ownPosition.lat,ownPosition.lng],16);
+    setMapMode(mapMode);
+    setTimeout(() => map.invalidateSize(), 100);
+  }
+  $("map").addEventListener("mousedown", () => { if(map) map._userMoved = true; });
+  $("map").addEventListener("touchstart", () => { if(map) map._userMoved = true; }, {passive:true});
+
+  function renderTargets() {
+    const items = currentTargets;
+    $("targets").innerHTML = "";
+    if (!items.length) { $("targets").textContent = "No target GPS locations received yet."; }
+    items.forEach(p => {
+      const row = document.createElement("div"); row.className = "target";
+      const name = document.createElement("span");
+      name.textContent = (p.role === "spy" ? "🟡 Spy: " : "🟢 Seeker: ") + p.name;
+      const btn = document.createElement("button"); btn.textContent = "Caught";
+      btn.onclick = () => socket.emit("mark-caught",{targetId:p.id});
+      row.append(name,btn); $("targets").appendChild(row);
+    });
+    renderMap();
+  }
+  socket.on("room-state", state => {
+    roomCode = state.code; myRole = state.myRole || ""; isHost = state.isHost;
+    hide("home");
+    if (state.status === "lobby") {
+      show("lobby"); hide("game");
+      $("roomCode").textContent = roomCode;
+      $("playerCount").textContent = `(${state.players.length}/60)`;
+      $("players").innerHTML = "";
+      state.players.forEach(p => {
+        const row = document.createElement("div"); row.className = "player";
+        const n = document.createElement("span"); n.textContent = p.name + (p.isHost ? " · Host" : "");
+        const r = document.createElement("span"); r.className = "pill"; r.textContent = p.role === "hunter" ? "Hunter" : "Player";
+        row.append(n,r); $("players").appendChild(row);
+      });
+      if (isHost) show("hostSettings"); else hide("hostSettings");
+      $("lobbyHunterCount").value = state.settings.hunterCount;
+      $("lobbyHunterCount").disabled = !isHost;
+      $("startBtn").classList.toggle("hidden",!isHost);
+      const minimumPlayers = Number(state.settings.hunterCount) + 1;
+      $("lobbyHint").textContent = `Minimum ${minimumPlayers} players. With 2 players: 1 Hunter and 1 Seeker. With enough players, a secret Spy is also assigned.`;
+    } else {
+      hide("lobby"); show("game");
+      $("roleName").textContent = myRole ? myRole.toUpperCase() : "GAME OVER";
+      $("roleDescription").textContent = myRole === "hunter" ? "Work together. Find the Seekers and the secret Spy." :
+        myRole === "spy" ? "You are secretly helping the Hunters. Stay hidden from the Seekers." :
+        myRole === "seeker" ? "Avoid the Hunters. Your location is visible to the Hunter team." : "";
+      if (myRole === "hunter") { show("hunterPanel"); hide("seekerMessage"); }
+      else { hide("hunterPanel"); if(myRole==="seeker" || myRole==="spy") show("seekerMessage"); }
+      if (state.status === "finished") show("finishedMessage"); else hide("finishedMessage");
+      $("endBtn").classList.toggle("hidden",!isHost || state.status === "finished");
+      if (myRole === "hunter") renderTargets();
+    }
+  });
+  socket.on("hunter-locations", data => {
+    currentHunters = data.hunters || [];
+    currentTargets = data.targets || [];
+    renderTargets();
+  });
+  socket.on("spy-intel", intel => {
+    if (myRole !== "hunter" || !intel || !intel.length) return;
+    $("intel").textContent = "Spy intelligence: " + intel.map(x=>x.name).join(", ");
+    show("intel");
+  });
+  socket.on("game-error", text => alert(text));
+  socket.on("game-message", text => { $("gpsNotice").textContent = text; });
+  socket.on("connect_error", () => message("Connection problem. Refresh the page when the server is available."));
+})();
+</script>
+</body>
+</html>

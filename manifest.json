@@ -1,0 +1,9 @@
+{
+  "name": "Hunter vs Seekers vs Spy",
+  "short_name": "Hunter Spy",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101827",
+  "theme_color": "#101827",
+  "icons": []
+}
