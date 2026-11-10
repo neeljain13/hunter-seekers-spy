@@ -1,4 +1,5 @@
 
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -95,8 +96,6 @@ button:disabled{opacity:.45}
   padding:8px
 }
 
-ul{padding-left:20px}
-
 .player{
   padding:8px 10px;
   border-bottom:1px solid var(--line);
@@ -175,10 +174,9 @@ ul{padding-left:20px}
 
 .leaflet-control-attribution{font-size:10px}
 
-/* Hunter proximity warning */
 #hunterProximityWarning{
   position:fixed;
-  top:env(safe-area-inset-top, 12px);
+  top:env(safe-area-inset-top,12px);
   left:50%;
   transform:translateX(-50%);
   width:calc(100% - 24px);
@@ -377,10 +375,7 @@ ul{padding-left:20px}
   let currentTargets = [];
   let mapMode = "normal";
 
-  // Store one marker per player.
   const playerMarkers = new Map();
-
-  // Store latest GPS coordinates for reconnection.
   let lastSentPosition = null;
 
   function show(id) {
@@ -395,9 +390,9 @@ ul{padding-left:20px}
     $("homeError").textContent = text || "";
   }
 
-  function callWithAck(event, payload) {
+  function callWithAck(event,payload) {
     return new Promise(resolve => {
-      socket.emit(event, payload, result =>
+      socket.emit(event,payload,result =>
         resolve(result || {
           ok:false,
           error:"No response from server."
@@ -409,7 +404,7 @@ ul{padding-left:20px}
   $("createBtn").onclick = async () => {
     message("");
 
-    const result = await callWithAck("create-room", {
+    const result = await callWithAck("create-room",{
       name:$("nameCreate").value,
       hunterCount:$("hunterCount").value
     });
@@ -420,7 +415,7 @@ ul{padding-left:20px}
   $("joinBtn").onclick = async () => {
     message("");
 
-    const result = await callWithAck("join-room", {
+    const result = await callWithAck("join-room",{
       name:$("nameJoin").value,
       code:$("roomInput").value
     });
@@ -438,7 +433,7 @@ ul{padding-left:20px}
   };
 
   $("lobbyHunterCount").onchange = () => {
-    socket.emit("set-hunter-count", {
+    socket.emit("set-hunter-count",{
       count:$("lobbyHunterCount").value
     });
   };
@@ -459,13 +454,13 @@ ul{padding-left:20px}
 
   $("myLocationBtn").onclick = () => {
     if (map && ownPosition) {
-      map.setView([ownPosition.lat, ownPosition.lng], 17);
+      map.setView([ownPosition.lat,ownPosition.lng],17);
     } else {
       $("gpsNotice").textContent = "Share your GPS location first.";
     }
   };
 
-  // Send the latest GPS position to the server.
+  // Send GPS position to the server.
   function sendPosition(pos) {
 
     ownPosition = {
@@ -480,7 +475,7 @@ ul{padding-left:20px}
     };
 
     if (socket.connected) {
-      socket.emit("location-update", lastSentPosition);
+      socket.emit("location-update",lastSentPosition);
     }
 
     $("gpsNotice").textContent =
@@ -493,7 +488,7 @@ ul{padding-left:20px}
     }
   }
 
-  // GPS sharing.
+  // Start continuous GPS watching.
   function startGPS() {
 
     if (!navigator.geolocation) {
@@ -545,17 +540,17 @@ ul{padding-left:20px}
     $("gpsNotice").textContent = "GPS sharing stopped.";
   }
 
-  // Resend last known location after reconnecting.
-  socket.on("connect", () => {
+  // Resend latest position when socket reconnects.
+  socket.on("connect",() => {
 
     if (lastSentPosition) {
-      socket.emit("location-update", lastSentPosition);
+      socket.emit("location-update",lastSentPosition);
     }
 
   });
 
-  // Hunter proximity warning.
-  socket.on("hunter-proximity-alert", data => {
+  // Hunter proximity warning for Seekers.
+  socket.on("hunter-proximity-alert",data => {
 
     if (myRole !== "seeker") {
       hide("hunterProximityWarning");
@@ -585,6 +580,23 @@ ul{padding-left:20px}
   });
 
   // Map layers.
+  const normalLayer = L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {
+      maxZoom:19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }
+  );
+
+  const satelliteLayer = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {
+      maxZoom:19,
+      attribution:"Tiles &copy; Esri and its imagery providers"
+    }
+  );
+
   function setMapMode(mode) {
 
     mapMode = mode;
@@ -601,7 +613,7 @@ ul{padding-left:20px}
 
     if (!map) return;
 
-    if (mapMode === "normal") {
+    if (mode === "normal") {
 
       if (map.hasLayer(satelliteLayer)) {
         map.removeLayer(satelliteLayer);
@@ -623,39 +635,22 @@ ul{padding-left:20px}
     }
   }
 
-  const normalLayer = L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-      maxZoom:19,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }
-  );
-
-  const satelliteLayer = L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    {
-      maxZoom:19,
-      attribution:"Tiles &copy; Esri and its imagery providers"
-    }
-  );
-
   function ensureMap() {
 
     if (map) return;
 
-    map = L.map("map", {
+    map = L.map("map",{
       zoomControl:true
-    }).setView([20.5937,78.9629], 5);
+    }).setView([20.5937,78.9629],5);
 
     normalLayer.addTo(map);
 
     markerLayer = L.layerGroup().addTo(map);
 
-    setTimeout(() => map.invalidateSize(), 150);
+    setTimeout(() => map.invalidateSize(),150);
   }
 
-  function markerIcon(color, label) {
+  function markerIcon(color,label) {
 
     return L.divIcon({
       className:"",
@@ -676,7 +671,7 @@ ul{padding-left:20px}
     });
   }
 
-  // Update existing markers instead of clearing the entire map.
+  // Update existing markers instead of rebuilding the map.
   function renderMap() {
 
     if (myRole !== "hunter") return;
@@ -760,7 +755,7 @@ ul{padding-left:20px}
       }
     });
 
-    // Remove players who were caught or disconnected.
+    // Remove caught or disconnected players.
     for (const [id,marker] of playerMarkers) {
 
       if (!activeIds.has(id)) {
@@ -769,7 +764,6 @@ ul{padding-left:20px}
       }
     }
 
-    // Keep the map centred on the Hunter until the Hunter moves the map.
     if (ownPosition && !map._userMoved) {
 
       map.setView(
@@ -925,4 +919,19 @@ ul{padding-left:20px}
           : myRole === "spy"
           ? "You are secretly helping the Hunters. Stay hidden from the Seekers."
           : myRole === "seeker"
-          ? "Avoid the Hunters. Your location is visible to the Hunt
+          ? "Avoid the Hunters. Your location is visible to the Hunter team."
+          : "";
+
+      if (myRole === "hunter") {
+
+        show("hunterPanel");
+        hide("seekerMessage");
+
+        ensureMap();
+        renderTargets();
+
+      } else {
+
+        hide("hunterPanel");
+
+        if (myR
