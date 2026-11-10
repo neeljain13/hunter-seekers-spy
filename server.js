@@ -1,798 +1,720 @@
 
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#101827">
-<meta name="description" content="Real-world multiplayer Hunter vs Seekers vs Spy game">
-<link rel="manifest" href="/manifest.json">
-<title>Hunter vs Seekers vs Spy</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const path = require("path");
+const crypto = require("crypto");
 
-<style>
-:root{
-  color-scheme:dark;
-  --bg:#101827;
-  --panel:#192638;
-  --line:#2d4058;
-  --text:#f4f7fb;
-  --muted:#a9b7c9;
-  --accent:#67a7ff
-}
-*{box-sizing:border-box}
-body{
-  margin:0;
-  background:radial-gradient(circle at top,#1c3048,var(--bg) 55%);
-  color:var(--text);
-  font:16px system-ui,-apple-system,Segoe UI,sans-serif;
-  min-height:100vh
-}
-main{
-  width:min(920px,100%);
-  margin:auto;
-  padding:22px 16px 50px
-}
-.brand{text-align:center;margin:8px 0 22px}
-.brand h1{font-size:clamp(25px,6vw,38px);margin:0}
-.brand p{color:var(--muted);margin:7px 0}
-.panel{
-  background:rgba(25,38,56,.96);
-  border:1px solid var(--line);
-  border-radius:18px;
-  padding:18px;
-  margin:14px 0;
-  box-shadow:0 12px 35px #0003
-}
-h2{font-size:20px;margin:0 0 13px}
-label{
-  display:block;
-  color:var(--muted);
-  font-size:14px;
-  margin:12px 0 6px
-}
-input,select,button{
-  font:inherit;
-  border-radius:11px;
-  padding:12px;
-  border:1px solid var(--line);
-  width:100%;
-  background:#0e1928;
-  color:var(--text)
-}
-button{
-  background:#2467bd;
-  border:0;
-  font-weight:700;
-  cursor:pointer;
-  margin-top:10px
-}
-button.secondary{background:#31445d}
-button.danger{background:#9c3434}
-button:disabled{opacity:.45;cursor:not-allowed}
-.row{display:flex;gap:10px}
-.row>*{flex:1;min-width:0}
-.hidden{display:none!important}
-.muted{color:var(--muted)}
-.code{
-  font-size:28px;
-  font-weight:800;
-  letter-spacing:5px;
-  text-align:center;
-  padding:8px
-}
-.player{
-  padding:8px 10px;
-  border-bottom:1px solid var(--line);
-  display:flex;
-  justify-content:space-between;
-  gap:10px
-}
-.pill{
-  font-size:12px;
-  color:#dceaff;
-  background:#28466a;
-  border-radius:20px;
-  padding:3px 8px
-}
-.role{font-size:25px;font-weight:800;margin:4px 0}
-.map-tools{
-  display:flex;
-  gap:8px;
-  align-items:center;
-  flex-wrap:wrap;
-  margin:8px 0
-}
-.map-tools button{
-  width:auto;
-  margin:0;
-  padding:9px 13px
-}
-.map-tools .active{
-  outline:2px solid #8bc1ff;
-  background:#174f8e
-}
-#map{
-  height:min(58vh,520px);
-  min-height:300px;
-  border-radius:14px;
-  overflow:hidden;
-  background:#26384b
-}
-.target{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  padding:9px 0;
-  border-bottom:1px solid var(--line)
-}
-.target button{
-  width:auto;
-  margin:0;
-  padding:8px 10px;
-  background:#8c3434
-}
-.notice{
-  padding:10px;
-  border-radius:10px;
-  background:#213d5b;
-  color:#d9eaff;
-  margin:10px 0;
-  font-size:14px
-}
-.leaflet-popup-content-wrapper,
-.leaflet-popup-tip{
-  background:#172638;
-  color:#fff
-}
-.leaflet-control-attribution{font-size:10px}
-#hunterProximityWarning{
-  position:fixed;
-  top:env(safe-area-inset-top,12px);
-  left:50%;
-  transform:translateX(-50%);
-  width:calc(100% - 24px);
-  max-width:440px;
-  z-index:100000;
-  padding:17px 16px;
-  border:2px solid #ffb4b4;
-  border-radius:14px;
-  background:#c62828;
-  color:white;
-  text-align:center;
-  font-size:17px;
-  font-weight:800;
-  line-height:1.4;
-  box-shadow:0 5px 24px #0009;
-  animation:warningPulse 1s infinite alternate
-}
-#hunterProximityWarning small{
-  display:block;
-  font-size:12px;
-  font-weight:500;
-  margin-top:5px;
-  color:#ffe2e2
-}
-@keyframes warningPulse{
-  from{box-shadow:0 5px 18px #0008}
-  to{box-shadow:0 5px 28px #ff333399}
-}
-@media(max-width:520px){
-  main{padding:14px 12px 35px}
-  .panel{padding:15px}
-  .row{flex-direction:column;gap:0}
-  #map{height:52vh}
-}
-</style>
-</head>
+const app = express();
+const server = http.createServer(app);
 
-<body>
+const io = new Server(server, {
+  cors: { origin: "*" },
+  pingInterval: 25000,
+  pingTimeout: 60000
+});
 
-<div id="hunterProximityWarning" class="hidden" role="alert" aria-live="assertive">
-  ⚠️ HUNTER NEARBY!
-  <small>A Hunter is within 25 metres of you. Move away!</small>
-</div>
+const PORT = process.env.PORT || 3000;
+const MAX_PLAYERS = 60;
+const PROXIMITY_RADIUS = 25;
+const MAX_LOCATION_AGE_MS = 30000;
 
-<main>
-<header class="brand">
-  <h1>🕵️ Hunter vs Seekers vs Spy</h1>
-  <p>Move in the real world. Track, hide and catch.</p>
-</header>
+const rooms = new Map();
 
-<section id="home" class="panel">
-  <h2>Create a game</h2>
-  <label for="nameCreate">Your name</label>
-  <input id="nameCreate" maxlength="22" placeholder="Enter your name">
+/* -------------------- WEBSITE ROUTES -------------------- */
 
-  <label for="hunterCount">Number of Hunters</label>
-  <select id="hunterCount">
-    <option value="1">1 Hunter</option>
-    <option value="2">2 Hunters</option>
-    <option value="3">3 Hunters</option>
-    <option value="4">4 Hunters</option>
-    <option value="5">5 Hunters</option>
-  </select>
-
-  <button id="createBtn">Create room</button>
-
-  <div style="height:16px"></div>
-
-  <h2>Join a game</h2>
-  <label for="nameJoin">Your name</label>
-  <input id="nameJoin" maxlength="22" placeholder="Enter your name">
-
-  <label for="roomInput">Room code</label>
-  <input id="roomInput" maxlength="6" placeholder="e.g. A1B2C3" autocapitalize="characters">
-
-  <button id="joinBtn" class="secondary">Join room</button>
-  <p id="homeError" class="muted" role="status"></p>
-  <p id="connectionStatus" class="muted">Connecting to game server...</p>
-</section>
-
-<section id="lobby" class="panel hidden">
-  <h2>Game lobby</h2>
-  <div class="muted">Share this room code with your friends.</div>
-  <div id="roomCode" class="code"></div>
-  <button id="copyBtn" class="secondary">Copy room code</button>
-
-  <div id="hostSettings" class="hidden">
-    <label for="lobbyHunterCount">Hunters (host setting)</label>
-    <select id="lobbyHunterCount">
-      <option value="1">1 Hunter</option>
-      <option value="2">2 Hunters</option>
-      <option value="3">3 Hunters</option>
-      <option value="4">4 Hunters</option>
-      <option value="5">5 Hunters</option>
-    </select>
-  </div>
-
-  <h2 style="margin-top:18px">
-    Players <span id="playerCount" class="muted"></span>
-  </h2>
-  <div id="players"></div>
-  <button id="startBtn">Start game</button>
-  <p id="lobbyHint" class="muted">At least 2 players are needed for one Hunter.</p>
-  <button id="leaveBtn" class="secondary">Leave room</button>
-</section>
-
-<section id="game" class="panel hidden">
-  <h2>Your secret role</h2>
-  <div id="roleName" class="role"></div>
-  <p id="roleDescription" class="muted"></p>
-
-  <div id="gpsNotice" class="notice">
-    Share your GPS location to play. Your location is sent only to the Hunter team.
-  </div>
-
-  <div class="row">
-    <button id="shareBtn">Share my location</button>
-    <button id="stopBtn" class="secondary">Stop sharing</button>
-  </div>
-
-  <div id="hunterPanel" class="hidden">
-    <h2 style="margin-top:20px">Hunter team map</h2>
-    <div class="map-tools">
-      <button id="normalBtn" class="active">Normal</button>
-      <button id="satelliteBtn" class="secondary">Satellite</button>
-      <button id="myLocationBtn" class="secondary">My location</button>
-    </div>
-    <div id="map"></div>
-    <p class="muted">Blue: you · Purple: teammates · Green: Seekers · Gold: Spy</p>
-    <h2 style="margin-top:18px">Players to catch</h2>
-    <div id="targets" class="muted">Waiting for GPS locations…</div>
-    <div id="intel" class="notice hidden"></div>
-  </div>
-
-  <div id="seekerMessage" class="notice hidden">
-    You are a Seeker. Keep moving and avoid the Hunters.
-    Your GPS position is shared with the Hunter team only.
-    A warning will appear when a Hunter comes within 25 metres.
-  </div>
-
-  <div id="finishedMessage" class="notice hidden">The game has ended.</div>
-  <button id="endBtn" class="danger hidden">End game (host)</button>
-</section>
-</main>
-
-<script src="/socket.io/socket.io.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-
-<script>
-(() => {
-  const socket = io({
-    reconnection:true,
-    reconnectionAttempts:Infinity,
-    reconnectionDelay:1000,
-    reconnectionDelayMax:5000,
-    timeout:20000
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    message: "Hunter vs Seekers server is running"
   });
+});
 
-  const $ = id => document.getElementById(id);
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
 
-  let roomCode = "";
-  let myRole = "";
-  let isHost = false;
-  let watchId = null;
-  let map = null;
-  let ownPosition = null;
-  let markerLayer = null;
-  let currentHunters = [];
-  let currentTargets = [];
-  let mapMode = "normal";
-  let lastSentPosition = null;
+app.get("/manifest.json", (_req, res) => {
+  res.sendFile(path.join(__dirname, "manifest.json"));
+});
 
-  const playerMarkers = new Map();
+app.get("/sw.js", (_req, res) => {
+  res.sendFile(path.join(__dirname, "sw.js"));
+});
 
-  function show(id){$(id).classList.remove("hidden")}
-  function hide(id){$(id).classList.add("hidden")}
-  function message(text){$("homeError").textContent=text||""}
+/* -------------------- HELPER FUNCTIONS -------------------- */
 
-  function callWithAck(event,payload,timeoutMs=10000){
-    return new Promise(resolve=>{
-      let completed=false;
-      const timer=setTimeout(()=>{
-        if(completed)return;
-        completed=true;
-        resolve({
-          ok:false,
-          error:"Server did not respond. Check your Render deployment and internet connection."
-        });
-      },timeoutMs);
+function makeCode() {
+  return crypto.randomBytes(3).toString("hex").toUpperCase();
+}
 
-      socket.emit(event,payload,result=>{
-        if(completed)return;
-        completed=true;
-        clearTimeout(timer);
-        resolve(result||{
-          ok:false,
-          error:"Invalid response from server."
-        });
-      });
+function cleanName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[<>]/g, "")
+    .slice(0, 22);
+}
+
+function roomFor(socket) {
+  const code = socket.data.roomCode;
+  return code ? rooms.get(code) : null;
+}
+
+function playerFor(room, socketId) {
+  return room ? room.players.get(socketId) : null;
+}
+
+function publicPlayers(room) {
+  return [...room.players.values()].map(player => ({
+    id: player.id,
+    name: player.name,
+
+    // Never reveal the Spy to other players.
+    role:
+      room.status === "active" && player.role === "hunter"
+        ? "hunter"
+        : "player",
+
+    caught: !!player.caught,
+    isHost: player.id === room.hostId
+  }));
+}
+
+function sendRoomState(room) {
+  const players = publicPlayers(room);
+
+  for (const player of room.players.values()) {
+    io.to(player.id).emit("room-state", {
+      code: room.code,
+      players,
+      status: room.status,
+      settings: room.settings,
+
+      myRole:
+        room.status === "active"
+          ? player.role
+          : null,
+
+      isHost: player.id === room.hostId
     });
   }
+}
 
-  function setBusy(button,busy,text){
-    button.disabled=busy;
-    button.textContent=busy?text:
-      (button.id==="createBtn"?"Create room":"Join room");
-  }
+function distanceInMetres(a, b) {
+  const earthRadius = 6371000;
 
-  // Create room.
-  $("createBtn").onclick=async()=>{
-    message("");
+  const toRadians = degrees => degrees * Math.PI / 180;
 
-    const name=$("nameCreate").value.trim();
+  const dLat = toRadians(b.lat - a.lat);
+  const dLng = toRadians(b.lng - a.lng);
 
-    if(!name){
-      message("Please enter your name first.");
-      $("nameCreate").focus();
-      return;
-    }
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
 
-    if(!socket.connected){
-      message("Not connected to the game server. Please wait and try again.");
-      return;
-    }
+  const value =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) *
+    Math.cos(lat2) *
+    Math.sin(dLng / 2) ** 2;
 
-    const button=$("createBtn");
-    setBusy(button,true,"Creating room...");
+  return earthRadius * 2 * Math.atan2(
+    Math.sqrt(value),
+    Math.sqrt(1 - value)
+  );
+}
 
-    try{
-      const result=await callWithAck("create-room",{
-        name,
-        hunterCount:$("hunterCount").value
-      });
+/* -------------------- PROXIMITY ALERT -------------------- */
 
-      if(!result.ok)message(result.error);
-    }catch(error){
-      message("Unable to create room. Please try again.");
-    }finally{
-      setBusy(button,false);
-    }
-  };
+function updateSeekerProximity(room) {
+  if (room.status !== "active") return;
 
-  // Join room.
-  $("joinBtn").onclick=async()=>{
-    message("");
+  const now = Date.now();
 
-    const name=$("nameJoin").value.trim();
-    const code=$("roomInput").value.trim().toUpperCase();
-
-    if(!name){
-      message("Please enter your name first.");
-      $("nameJoin").focus();
-      return;
-    }
-
-    if(!code){
-      message("Please enter the room code.");
-      $("roomInput").focus();
-      return;
-    }
-
-    if(!socket.connected){
-      message("Not connected to the game server. Please wait and try again.");
-      return;
-    }
-
-    const button=$("joinBtn");
-    setBusy(button,true,"Joining room...");
-
-    try{
-      const result=await callWithAck("join-room",{name,code});
-
-      if(!result.ok)message(result.error);
-    }catch(error){
-      message("Unable to join room. Please try again.");
-    }finally{
-      setBusy(button,false);
-    }
-  };
-
-  $("copyBtn").onclick=async()=>{
-    try{
-      await navigator.clipboard.writeText(roomCode);
-      $("copyBtn").textContent="Copied!";
-    }catch{
-      $("copyBtn").textContent="Room code: "+roomCode;
-    }
-  };
-
-  $("lobbyHunterCount").onchange=()=>{
-    socket.emit("set-hunter-count",{
-      count:$("lobbyHunterCount").value
-    });
-  };
-
-  $("startBtn").onclick=()=>{
-    if(socket.connected)socket.emit("start-game");
-    else message("Server disconnected. Please reconnect.");
-  };
-
-  $("endBtn").onclick=()=>{
-    if(socket.connected)socket.emit("end-game");
-  };
-
-  $("leaveBtn").onclick=()=>{
-    stopGPS();
-    location.reload();
-  };
-
-  $("shareBtn").onclick=startGPS;
-  $("stopBtn").onclick=stopGPS;
-  $("normalBtn").onclick=()=>setMapMode("normal");
-  $("satelliteBtn").onclick=()=>setMapMode("satellite");
-
-  $("myLocationBtn").onclick=()=>{
-    if(map&&ownPosition){
-      map.setView([ownPosition.lat,ownPosition.lng],17);
-    }else{
-      $("gpsNotice").textContent="Share your GPS location first.";
-    }
-  };
-
-  // GPS location update.
-  function sendPosition(pos){
-    ownPosition={
-      lat:pos.coords.latitude,
-      lng:pos.coords.longitude
-    };
-
-    lastSentPosition={
-      lat:ownPosition.lat,
-      lng:ownPosition.lng,
-      accuracy:pos.coords.accuracy
-    };
-
-    if(socket.connected){
-      socket.emit("location-update",lastSentPosition);
-    }
-
-    $("gpsNotice").textContent=
-      "GPS is sharing. Accuracy: approximately "+
-      Math.round(pos.coords.accuracy)+
-      " metres. Keep this page open.";
-
-    if(myRole==="hunter")renderMap();
-  }
-
-  function startGPS(){
-    if(!navigator.geolocation){
-      $("gpsNotice").textContent="GPS is not supported by this browser.";
-      return;
-    }
-
-    if(location.protocol!=="https:"&&location.hostname!=="localhost"){
-      $("gpsNotice").textContent="GPS needs a secure HTTPS connection.";
-      return;
-    }
-
-    if(watchId!==null)return;
-
-    $("gpsNotice").textContent="Waiting for GPS permission and location…";
-
-    watchId=navigator.geolocation.watchPosition(
-      sendPosition,
-      err=>{
-        $("gpsNotice").textContent=
-          "GPS error: "+err.message+
-          ". Check browser location permission.";
-      },
-      {
-        enableHighAccuracy:true,
-        maximumAge:0,
-        timeout:20000
-      }
-    );
-  }
-
-  function stopGPS(){
-    if(watchId!==null){
-      navigator.geolocation.clearWatch(watchId);
-    }
-    watchId=null;
-    lastSentPosition=null;
-    $("gpsNotice").textContent="GPS sharing stopped.";
-  }
-
-  // Socket connection status.
-  socket.on("connect",()=>{
-    $("connectionStatus").textContent="Connected to game server.";
-    $("connectionStatus").style.color="#6ee7a1";
-
-    if(lastSentPosition){
-      socket.emit("location-update",lastSentPosition);
-    }
-  });
-
-  socket.on("disconnect",()=>{
-    $("connectionStatus").textContent="Disconnected. Reconnecting...";
-    $("connectionStatus").style.color="#ffb0a8";
-    $("gpsNotice").textContent="Internet disconnected. Trying to reconnect...";
-  });
-
-  socket.on("connect_error",()=>{
-    $("connectionStatus").textContent="Cannot connect to server. Check Render.";
-    $("connectionStatus").style.color="#ffb0a8";
-  });
-
-  // Hunter proximity warning.
-  socket.on("hunter-proximity-alert",data=>{
-    if(myRole!=="seeker"){
-      hide("hunterProximityWarning");
-      return;
-    }
-
-    if(data&&data.near){
-      $("hunterProximityWarning").innerHTML=
-        "⚠️ HUNTER NEARBY!"+
-        "<small>A Hunter is within 25 metres of you. Move away!</small>";
-
-      show("hunterProximityWarning");
-
-      if(navigator.vibrate)navigator.vibrate([300,150,300]);
-    }else{
-      hide("hunterProximityWarning");
-      if(navigator.vibrate)navigator.vibrate(0);
-    }
-  });
-
-  // Map layers.
-  const normalLayer=L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-      maxZoom:19,
-      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }
+  const hunters = [...room.players.values()].filter(player =>
+    player.role === "hunter" &&
+    !player.caught &&
+    player.location &&
+    now - player.location.updatedAt <= MAX_LOCATION_AGE_MS
   );
 
-  const satelliteLayer=L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    {
-      maxZoom:19,
-      attribution:"Tiles &copy; Esri and its imagery providers"
-    }
+  const seekers = [...room.players.values()].filter(player =>
+    player.role === "seeker" &&
+    !player.caught
   );
 
-  function setMapMode(mode){
-    mapMode=mode;
-
-    $("normalBtn").classList.toggle("active",mode==="normal");
-    $("satelliteBtn").classList.toggle("active",mode==="satellite");
-
-    if(!map)return;
-
-    if(mode==="normal"){
-      if(map.hasLayer(satelliteLayer))map.removeLayer(satelliteLayer);
-      if(!map.hasLayer(normalLayer))normalLayer.addTo(map);
-    }else{
-      if(map.hasLayer(normalLayer))map.removeLayer(normalLayer);
-      if(!map.hasLayer(satelliteLayer))satelliteLayer.addTo(map);
-    }
-  }
-
-  function ensureMap(){
-    if(map)return;
-
-    map=L.map("map",{zoomControl:true}).setView([20.5937,78.9629],5);
-    normalLayer.addTo(map);
-    markerLayer=L.layerGroup().addTo(map);
-
-    setTimeout(()=>map.invalidateSize(),150);
-  }
-
-  function markerIcon(color,label){
-    return L.divIcon({
-      className:"",
-      html:`<div style="
-        background:${color};
-        border:2px solid white;
-        border-radius:18px;
-        color:white;
-        font-size:11px;
-        font-weight:800;
-        padding:5px 8px;
-        box-shadow:0 2px 7px #0008;
-        white-space:nowrap
-      ">${label}</div>`,
-      iconSize:null,
-      iconAnchor:[20,14]
-    });
-  }
-
-  function renderMap(){
-    if(myRole!=="hunter")return;
-
-    ensureMap();
-
-    const visiblePlayers=[];
-
-    if(ownPosition){
-      visiblePlayers.push({
-        id:socket.id,
-        name:"YOU",
-        role:"hunter",
-        lat:ownPosition.lat,
-        lng:ownPosition.lng,
-        color:"#1769e0"
-      });
-    }
-
-    currentHunters.forEach(p=>{
-      if(p.id===socket.id)return;
-      visiblePlayers.push({...p,color:"#8154d8"});
-    });
-
-    currentTargets.forEach(p=>{
-      visiblePlayers.push({
-        ...p,
-        color:p.role==="spy"?"#d49b20":"#229b68"
-      });
-    });
-
-    const activeIds=new Set();
-    const bounds=[];
-
-    visiblePlayers.forEach(p=>{
-      const lat=Number(p.lat);
-      const lng=Number(p.lng);
-
-      if(!Number.isFinite(lat)||!Number.isFinite(lng)||
-         Math.abs(lat)>90||Math.abs(lng)>180)return;
-
-      activeIds.add(p.id);
-      const position=[lat,lng];
-      bounds.push(position);
-
-      const label=p.id===socket.id?"YOU":
-        (p.role==="spy"?"SPY · ":
-        p.role==="hunter"?"HUNTER · ":"SEEKER · ")+p.name;
-
-      let marker=playerMarkers.get(p.id);
-
-      if(marker){
-        marker.setLatLng(position);
-        marker.setIcon(markerIcon(p.color,label));
-      }else{
-        marker=L.marker(position,{
-          icon:markerIcon(p.color,label)
-        }).addTo(markerLayer);
-
-        marker.bindPopup(label);
-        playerMarkers.set(p.id,marker);
-      }
-    });
-
-    for(const [id,marker] of playerMarkers){
-      if(!activeIds.has(id)){
-        markerLayer.removeLayer(marker);
-        playerMarkers.delete(id);
-      }
-    }
-
-    if(ownPosition&&!map._userMoved){
-      map.setView(
-        [ownPosition.lat,ownPosition.lng],
-        Math.max(map.getZoom(),16)
+  for (const seeker of seekers) {
+    const isNear =
+      !!seeker.location &&
+      hunters.some(hunter =>
+        distanceInMetres(
+          seeker.location,
+          hunter.location
+        ) <= PROXIMITY_RADIUS
       );
-    }else if(!ownPosition&&bounds.length&&!map._userMoved){
-      map.fitBounds(bounds,{padding:[25,25],maxZoom:16});
+
+    if (isNear && !seeker.hunterNearby) {
+      io.to(seeker.id).emit("hunter-proximity-alert", {
+        near: true,
+        message: "WARNING! A Hunter is within 25 metres of you!"
+      });
     }
 
-    setMapMode(mapMode);
-    setTimeout(()=>map.invalidateSize(),100);
-  }
+    if (!isNear && seeker.hunterNearby) {
+      io.to(seeker.id).emit("hunter-proximity-alert", {
+        near: false,
+        message: "You are outside the Hunter's 25-metre radius."
+      });
+    }
 
-  $("map").addEventListener("mousedown",()=>{
-    if(map)map._userMoved=true;
+    seeker.hunterNearby = isNear;
+  }
+}
+
+/* -------------------- HUNTER LOCATION DATA -------------------- */
+
+// Only Hunters receive this information.
+// Seekers never receive other players' GPS coordinates.
+
+function sendHunterData(room) {
+  if (room.status !== "active") return;
+
+  const now = Date.now();
+
+  const hunters = [...room.players.values()]
+    .filter(player =>
+      player.role === "hunter" &&
+      !player.caught &&
+      player.location &&
+      now - player.location.updatedAt <= MAX_LOCATION_AGE_MS
+    )
+    .map(player => ({
+      id: player.id,
+      name: player.name,
+      role: "hunter",
+      lat: player.location.lat,
+      lng: player.location.lng,
+      updatedAt: player.location.updatedAt,
+      accuracy: player.location.accuracy
+    }));
+
+  const targets = [...room.players.values()]
+    .filter(player =>
+      (player.role === "seeker" || player.role === "spy") &&
+      !player.caught &&
+      player.location &&
+      now - player.location.updatedAt <= MAX_LOCATION_AGE_MS
+    )
+    .map(player => ({
+      id: player.id,
+      name: player.name,
+      role: player.role,
+      lat: player.location.lat,
+      lng: player.location.lng,
+      updatedAt: player.location.updatedAt,
+      accuracy: player.location.accuracy
+    }));
+
+  const intel = [...room.players.values()]
+    .filter(player =>
+      player.role === "spy" &&
+      !player.caught
+    )
+    .map(player => ({
+      name: player.name,
+      message: "The Spy is secretly helping the Hunter team."
+    }));
+
+  for (const player of room.players.values()) {
+    if (player.role === "hunter") {
+      io.to(player.id).emit("hunter-locations", {
+        hunters,
+        targets,
+        serverTime: now
+      });
+
+      io.to(player.id).emit("spy-intel", intel);
+    }
+  }
+}
+
+/* -------------------- ROLE ASSIGNMENT -------------------- */
+
+function assignRoles(room) {
+  const allPlayers = [...room.players.values()];
+
+  const hunterCount = Math.max(
+    1,
+    Math.min(
+      5,
+      Number(room.settings.hunterCount) || 1
+    )
+  );
+
+  const shuffled = allPlayers
+    .slice()
+    .sort(() => Math.random() - 0.5);
+
+  shuffled.forEach(player => {
+    player.role = "seeker";
+    player.caught = false;
+    player.location = null;
+    player.hunterNearby = false;
   });
 
-  $("map").addEventListener("touchstart",()=>{
-    if(map)map._userMoved=true;
-  },{passive:true});
+  // Assign Hunters.
+  shuffled
+    .slice(0, hunterCount)
+    .forEach(player => {
+      player.role = "hunter";
+    });
 
-  function renderTargets(){
-    $("targets").innerHTML="";
+  const remainingPlayers = shuffled.slice(hunterCount);
 
-    if(!currentTargets.length){
-      $("targets").textContent="No target GPS locations received yet.";
+  // Assign one Spy only when at least two non-Hunters exist.
+  if (remainingPlayers.length >= 2) {
+    remainingPlayers[0].role = "spy";
+
+    remainingPlayers
+      .slice(1)
+      .forEach(player => {
+        player.role = "seeker";
+      });
+  }
+}
+
+/* -------------------- REMOVE PLAYER -------------------- */
+
+function removePlayer(socket) {
+  const room = roomFor(socket);
+
+  if (!room) return;
+
+  room.players.delete(socket.id);
+
+  socket.data.roomCode = null;
+  socket.leave(room.code);
+
+  if (room.players.size === 0) {
+    rooms.delete(room.code);
+    return;
+  }
+
+  // Transfer host if the host leaves.
+  if (room.hostId === socket.id) {
+    room.hostId = room.players.keys().next().value;
+  }
+
+  if (room.status === "active") {
+    updateSeekerProximity(room);
+    sendHunterData(room);
+  }
+
+  sendRoomState(room);
+}
+
+/* -------------------- SOCKET CONNECTION -------------------- */
+
+io.on("connection", socket => {
+
+  console.log("Player connected:", socket.id);
+
+  /* ---------------- CREATE ROOM ---------------- */
+
+  socket.on(
+    "create-room",
+    ({ name, hunterCount } = {}, callback = () => {}) => {
+
+      try {
+        const playerName = cleanName(name);
+
+        if (!playerName) {
+          return callback({
+            ok: false,
+            error: "Enter your name first."
+          });
+        }
+
+        // Do not allow one socket to create multiple rooms.
+        if (roomFor(socket)) {
+          return callback({
+            ok: false,
+            error: "You are already in a room. Leave it first."
+          });
+        }
+
+        let code = makeCode();
+
+        while (rooms.has(code)) {
+          code = makeCode();
+        }
+
+        const count = Math.max(
+          1,
+          Math.min(5, Number(hunterCount) || 1)
+        );
+
+        const room = {
+          code,
+          hostId: socket.id,
+          status: "lobby",
+
+          settings: {
+            hunterCount: count
+          },
+
+          players: new Map()
+        };
+
+        room.players.set(socket.id, {
+          id: socket.id,
+          name: playerName,
+          role: null,
+          caught: false,
+          location: null,
+          hunterNearby: false
+        });
+
+        rooms.set(code, room);
+
+        socket.data.roomCode = code;
+
+        // Join the Socket.IO room.
+        socket.join(code);
+
+        console.log(
+          "Room created:",
+          code,
+          "by",
+          playerName
+        );
+
+        callback({
+          ok: true,
+          code
+        });
+
+        sendRoomState(room);
+
+      } catch (error) {
+        console.error("Create room error:", error);
+
+        callback({
+          ok: false,
+          error: "Unable to create room. Please try again."
+        });
+      }
+    }
+  );
+
+  /* ---------------- JOIN ROOM ---------------- */
+
+  socket.on(
+    "join-room",
+    ({ name, code } = {}, callback = () => {}) => {
+
+      try {
+        const playerName = cleanName(name);
+
+        const roomCode = String(code || "")
+          .trim()
+          .toUpperCase();
+
+        const room = rooms.get(roomCode);
+
+        if (!playerName) {
+          return callback({
+            ok: false,
+            error: "Enter your name first."
+          });
+        }
+
+        if (roomFor(socket)) {
+          return callback({
+            ok: false,
+            error: "You are already in a room. Leave it first."
+          });
+        }
+
+        if (!room) {
+          return callback({
+            ok: false,
+            error: "Room not found. Check the code."
+          });
+        }
+
+        if (room.status !== "lobby") {
+          return callback({
+            ok: false,
+            error: "This game has already started."
+          });
+        }
+
+        if (room.players.size >= MAX_PLAYERS) {
+          return callback({
+            ok: false,
+            error: "This room is full."
+          });
+        }
+
+        room.players.set(socket.id, {
+          id: socket.id,
+          name: playerName,
+          role: null,
+          caught: false,
+          location: null,
+          hunterNearby: false
+        });
+
+        socket.data.roomCode = roomCode;
+
+        // Join the Socket.IO room.
+        socket.join(roomCode);
+
+        console.log(
+          playerName,
+          "joined room:",
+          roomCode
+        );
+
+        callback({
+          ok: true,
+          code: roomCode
+        });
+
+        sendRoomState(room);
+
+      } catch (error) {
+        console.error("Join room error:", error);
+
+        callback({
+          ok: false,
+          error: "Unable to join room. Please try again."
+        });
+      }
+    }
+  );
+
+  /* ---------------- CHANGE HUNTER COUNT ---------------- */
+
+  socket.on("set-hunter-count", ({ count } = {}) => {
+    const room = roomFor(socket);
+
+    if (
+      !room ||
+      room.status !== "lobby" ||
+      room.hostId !== socket.id
+    ) return;
+
+    room.settings.hunterCount = Math.max(
+      1,
+      Math.min(5, Number(count) || 1)
+    );
+
+    sendRoomState(room);
+  });
+
+  /* ---------------- START GAME ---------------- */
+
+  socket.on("start-game", () => {
+    const room = roomFor(socket);
+
+    if (
+      !room ||
+      room.hostId !== socket.id ||
+      room.status !== "lobby"
+    ) return;
+
+    const required = room.settings.hunterCount + 1;
+
+    if (room.players.size < required) {
+      socket.emit(
+        "game-error",
+        `You need at least ${required} players for ${room.settings.hunterCount} Hunter(s).`
+      );
+
+      return;
     }
 
-    currentTargets.forEach(p=>{
-      const row=document.createElement("div");
-      row.className="target";
+    assignRoles(room);
 
-      const name=document.createElement("span");
-      name.textContent=(p.role==="spy"?"🟡 Spy: ":"🟢 Seeker: ")+p.name;
+    room.status = "active";
 
-      const btn=document.createElement("button");
-      btn.textContent="Caught";
-      btn.onclick=()=>{
-        socket.emit("mark-caught",{targetId:p.id});
+    console.log("Game started:", room.code);
+
+    sendRoomState(room);
+    sendHunterData(room);
+    updateSeekerProximity(room);
+  });
+
+  /* ---------------- GPS LOCATION UPDATE ---------------- */
+
+  socket.on(
+    "location-update",
+    ({ lat, lng, accuracy } = {}) => {
+
+      const room = roomFor(socket);
+      const player = playerFor(room, socket.id);
+
+      if (
+        !room ||
+        room.status !== "active" ||
+        !player ||
+        player.caught
+      ) return;
+
+      const latitude = Number(lat);
+      const longitude = Number(lng);
+      const gpsAccuracy = Number(accuracy);
+
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        Math.abs(latitude) > 90 ||
+        Math.abs(longitude) > 180
+      ) return;
+
+      player.location = {
+        lat: latitude,
+        lng: longitude,
+
+        accuracy: Number.isFinite(gpsAccuracy)
+          ? gpsAccuracy
+          : null,
+
+        updatedAt: Date.now()
       };
 
-      row.append(name,btn);
-      $("targets").appendChild(row);
-    });
+      // Immediately update all Hunters.
+      sendHunterData(room);
 
-    renderMap();
-  }
+      // Check whether a Hunter is within 25 metres.
+      updateSeekerProximity(room);
+    }
+  );
 
-  // Room and game updates.
-  socket.on("room-state",state=>{
-    roomCode=state.code;
-    myRole=state.myRole||"";
-    isHost=state.isHost;
+  /* ---------------- MARK PLAYER CAUGHT ---------------- */
 
-    if(myRole!=="seeker"){
-      hide("hunterProximityWarning");
-      if(navigator.vibrate)navigator.vibrate(0);
+  socket.on("mark-caught", ({ targetId } = {}) => {
+
+    const room = roomFor(socket);
+
+    const hunter = playerFor(room, socket.id);
+    const target = playerFor(room, targetId);
+
+    if (
+      !room ||
+      room.status !== "active" ||
+      !hunter ||
+      hunter.role !== "hunter" ||
+      !target ||
+      (target.role !== "seeker" && target.role !== "spy") ||
+      target.caught
+    ) return;
+
+    target.caught = true;
+    target.location = null;
+    target.hunterNearby = false;
+
+    const remaining = [...room.players.values()]
+      .filter(player =>
+        (player.role === "seeker" || player.role === "spy") &&
+        !player.caught
+      ).length;
+
+    if (remaining === 0) {
+      room.status = "finished";
     }
 
-    hide("home");
+    updateSeekerProximity(room);
+    sendRoomState(room);
+    sendHunterData(room);
 
-    if(state.status==="lobby"){
-      hide("game");
-      show("lobby");
+    io.to(room.code).emit(
+      "game-message",
+      `${target.name} was caught.`
+    );
 
-      $("roomCode").textContent=roomCode;
-      $("playerCount").textContent=`(${state.players.length}/60)`;
-      $("players").innerHTML="";
+    console.log(
+      target.name,
+      "was caught in room",
+      room.code
+    );
+  });
 
-      state.players.forEach(p=>{
-        const row=document.createElement("div");
-        row.className="player";
+  /* ---------------- END GAME ---------------- */
 
-        const n=document.createElement("span");
-        n.textContent=p.name+(p.isHost?" · Host":"");
+  socket.on("end-game", () => {
 
-        const r=document.createElement("span");
-        r.className="pill";
-        r.textContent=p.role==="hunter"?"Hunter":"Player";
+    const room = roomFor(socket);
 
-        row.append(n,r);
-        $("players").appendChild(row);
-      });
+    if (
+      !room ||
+      room.hostId !== socket.id
+    ) return;
 
-      if(is
+    room.status = "finished";
+
+    for (const player of room.players.values()) {
+      player.location = null;
+      player.hunterNearby = false;
+
+      io.to(player.id).emit(
+        "hunter-proximity-alert",
+        { near: false }
+      );
+    }
+
+    sendRoomState(room);
+    sendHunterData(room);
+
+    console.log("Game ended:", room.code);
+  });
+
+  /* ---------------- DISCONNECT ---------------- */
+
+  socket.on("disconnect", reason => {
+
+    console.log(
+      "Player disconnected:",
+      socket.id,
+      reason
+    );
+
+    removePlayer(socket);
+  });
+
+});
+
+/* -------------------- GPS CLEANUP -------------------- */
+
+// Remove old GPS locations and refresh Hunter maps every 3 seconds.
+
+setInterval(() => {
+
+  const now = Date.now();
+
+  for (const room of rooms.values()) {
+
+    if (room.status !== "active") continue;
+
+    for (const player of room.players.values()) {
+
+      if (
+        player.location &&
+        now - player.location.updatedAt > MAX_LOCATION_AGE_MS
+      ) {
+        player.location = null;
+      }
+    }
+
+    sendHunterData(room);
+    updateSeekerProximity(room);
+  }
+
+}, 3000);
+
+/* -------------------- SERVER START -------------------- */
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Game server running on port ${PORT}`);
+});
