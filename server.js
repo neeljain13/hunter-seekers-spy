@@ -7,6 +7,7 @@ const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
+
 const io = new Server(server, {
   cors: { origin: "*" },
   pingInterval: 25000,
@@ -15,7 +16,7 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 60;
-const PROXIMITY_RADIUS = 10;
+const PROXIMITY_RADIUS = 25;
 const MAX_LOCATION_AGE_MS = 30000;
 const rooms = new Map();
 
@@ -44,7 +45,9 @@ function publicPlayers(room) {
   return [...room.players.values()].map(p => ({
     id: p.id,
     name: p.name,
-    role: room.status === "active" && p.role === "hunter" ? "hunter" : "player",
+    role: room.status === "active" && p.role === "hunter"
+      ? "hunter"
+      : "player",
     caught: !!p.caught,
     isHost: p.id === room.hostId
   }));
@@ -65,14 +68,12 @@ function sendRoomState(room) {
   }
 }
 
-// Calculate distance between two GPS coordinates in metres.
 function distanceInMetres(a, b) {
   const earthRadius = 6371000;
   const toRadians = degrees => degrees * Math.PI / 180;
 
   const dLat = toRadians(b.lat - a.lat);
   const dLng = toRadians(b.lng - a.lng);
-
   const lat1 = toRadians(a.lat);
   const lat2 = toRadians(b.lat);
 
@@ -87,8 +88,6 @@ function distanceInMetres(a, b) {
   );
 }
 
-// Send proximity warnings ONLY to Seekers.
-// No Hunter coordinates or exact distances are shared.
 function updateSeekerProximity(room) {
   if (room.status !== "active") return;
 
@@ -110,19 +109,17 @@ function updateSeekerProximity(room) {
       distanceInMetres(seeker.location, hunter.location) <= PROXIMITY_RADIUS
     );
 
-    // Alert only when entering the 10-metre zone.
     if (isNear && !seeker.hunterNearby) {
       io.to(seeker.id).emit("hunter-proximity-alert", {
         near: true,
-        message: "WARNING! A Hunter is within 10 metres of you!"
+        message: "WARNING! A Hunter is within 25 metres of you!"
       });
     }
 
-    // Clear the warning after every Hunter moves away.
     if (!isNear && seeker.hunterNearby) {
       io.to(seeker.id).emit("hunter-proximity-alert", {
         near: false,
-        message: "You are outside the Hunter's 10-metre radius."
+        message: "You are outside the Hunter's 25-metre radius."
       });
     }
 
@@ -130,8 +127,70 @@ function updateSeekerProximity(room) {
   }
 }
 
+// Send fresh locations to all Hunters.
+// Seekers never receive this event.
+function sendHunterData(room) {
+  if (room.status !== "active") return;
+
+  const now = Date.now();
+
+  const hunters = [...room.players.values()]
+    .filter(p =>
+      p.role === "hunter" &&
+      !p.caught &&
+      p.location &&
+      now - p.location.updatedAt <= MAX_LOCATION_AGE_MS
+    )
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      role: "hunter",
+      lat: p.location.lat,
+      lng: p.location.lng,
+      updatedAt: p.location.updatedAt,
+      accuracy: p.location.accuracy
+    }));
+
+  const targets = [...room.players.values()]
+    .filter(p =>
+      (p.role === "seeker" || p.role === "spy") &&
+      !p.caught &&
+      p.location &&
+      now - p.location.updatedAt <= MAX_LOCATION_AGE_MS
+    )
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      role: p.role,
+      lat: p.location.lat,
+      lng: p.location.lng,
+      updatedAt: p.location.updatedAt,
+      accuracy: p.location.accuracy
+    }));
+
+  const intel = [...room.players.values()]
+    .filter(p => p.role === "spy" && !p.caught)
+    .map(p => ({
+      name: p.name,
+      message: "The Spy is secretly helping the Hunter team."
+    }));
+
+  for (const p of room.players.values()) {
+    if (p.role === "hunter") {
+      io.to(p.id).emit("hunter-locations", {
+        hunters,
+        targets,
+        serverTime: now
+      });
+
+      io.to(p.id).emit("spy-intel", intel);
+    }
+  }
+}
+
 function assignRoles(room) {
   const all = [...room.players.values()];
+
   const hunterCount = Math.max(
     1,
     Math.min(5, Number(room.settings.hunterCount) || 1)
@@ -162,48 +221,6 @@ function assignRoles(room) {
   }
 }
 
-function sendHunterData(room) {
-  if (room.status !== "active") return;
-
-  const hunters = [...room.players.values()]
-    .filter(p => p.role === "hunter" && !p.caught && p.location)
-    .map(p => ({
-      id: p.id,
-      name: p.name,
-      role: "hunter",
-      lat: p.location.lat,
-      lng: p.location.lng
-    }));
-
-  const targets = [...room.players.values()]
-    .filter(p =>
-      (p.role === "seeker" || p.role === "spy") &&
-      !p.caught &&
-      p.location
-    )
-    .map(p => ({
-      id: p.id,
-      name: p.name,
-      role: p.role,
-      lat: p.location.lat,
-      lng: p.location.lng
-    }));
-
-  const intel = [...room.players.values()]
-    .filter(p => p.role === "spy" && !p.caught)
-    .map(p => ({
-      name: p.name,
-      message: "The Spy is secretly helping the Hunter team."
-    }));
-
-  for (const p of room.players.values()) {
-    if (p.role === "hunter") {
-      io.to(p.id).emit("hunter-locations", { hunters, targets });
-      io.to(p.id).emit("spy-intel", intel);
-    }
-  }
-}
-
 function removePlayer(socket) {
   const room = roomFor(socket);
   if (!room) return;
@@ -229,6 +246,7 @@ function removePlayer(socket) {
 }
 
 io.on("connection", socket => {
+
   socket.on("create-room", ({ name, hunterCount } = {}, callback = () => {}) => {
     const playerName = cleanName(name);
 
@@ -337,14 +355,16 @@ io.on("connection", socket => {
     updateSeekerProximity(room);
   });
 
-  socket.on("location-update", ({ lat, lng } = {}) => {
+  // Receive GPS updates from every player.
+  socket.on("location-update", ({ lat, lng, accuracy } = {}) => {
     const room = roomFor(socket);
     const player = playerFor(room, socket.id);
 
-    if (!room || room.status !== "active" || !player) return;
+    if (!room || room.status !== "active" || !player || player.caught) return;
 
     const latitude = Number(lat);
     const longitude = Number(lng);
+    const gpsAccuracy = Number(accuracy);
 
     if (
       !Number.isFinite(latitude) ||
@@ -356,9 +376,11 @@ io.on("connection", socket => {
     player.location = {
       lat: latitude,
       lng: longitude,
+      accuracy: Number.isFinite(gpsAccuracy) ? gpsAccuracy : null,
       updatedAt: Date.now()
     };
 
+    // Immediately send the latest positions to every Hunter.
     sendHunterData(room);
     updateSeekerProximity(room);
   });
@@ -413,10 +435,32 @@ io.on("connection", socket => {
     }
 
     sendRoomState(room);
+    sendHunterData(room);
   });
 
   socket.on("disconnect", () => removePlayer(socket));
 });
+
+// Periodically refresh Hunter maps and expire stale GPS positions.
+setInterval(() => {
+  const now = Date.now();
+
+  for (const room of rooms.values()) {
+    if (room.status !== "active") continue;
+
+    for (const player of room.players.values()) {
+      if (
+        player.location &&
+        now - player.location.updatedAt > MAX_LOCATION_AGE_MS
+      ) {
+        player.location = null;
+      }
+    }
+
+    sendHunterData(room);
+    updateSeekerProximity(room);
+  }
+}, 3000);
 
 server.listen(PORT, () => {
   console.log(`Game server listening on ${PORT}`);
