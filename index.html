@@ -795,4 +795,145 @@ button:disabled{opacity:.45;cursor:not-allowed}
         $("players").appendChild(row);
       });
 
-      if(is
+      
+      if(isHost){
+        show("hostSettings");
+        $("lobbyHunterCount").value =
+          String(state.settings?.hunterCount || 1);
+        show("startBtn");
+      }else{
+        hide("hostSettings");
+        hide("startBtn");
+      }
+
+      const required =
+        Number(state.settings?.hunterCount || 1) + 1;
+
+      $("startBtn").disabled =
+        !isHost || state.players.length < required;
+
+      $("lobbyHint").textContent =
+        state.players.length < required
+          ? `At least ${required} players are needed to start.`
+          : "Enough players! The host can start the game.";
+
+      return;
+    }
+
+    // Active or finished game.
+    hide("lobby");
+    show("game");
+
+    if(state.myRole){
+      myRole = state.myRole;
+    }
+
+    if(myRole === "hunter"){
+      $("roleName").textContent = "🔵 HUNTER";
+      $("roleDescription").textContent =
+        "Find and catch all Seekers and the Spy. Work together with your Hunter teammates.";
+
+      show("hunterPanel");
+      hide("seekerMessage");
+    }
+    else if(myRole === "spy"){
+      $("roleName").textContent = "🕵️ SPY";
+      $("roleDescription").textContent =
+        "You are secretly helping the Hunters. Your identity is hidden from the other players.";
+
+      hide("hunterPanel");
+      hide("seekerMessage");
+    }
+    else if(myRole === "seeker"){
+      $("roleName").textContent = "🟢 SEEKER";
+      $("roleDescription").textContent =
+        "Avoid the Hunters and stay safe. Watch out for the 25-metre warning.";
+
+      hide("hunterPanel");
+      show("seekerMessage");
+    }
+
+    if(isHost){
+      show("endBtn");
+    }else{
+      hide("endBtn");
+    }
+
+    if(state.status === "finished"){
+      show("finishedMessage");
+      hide("hunterPanel");
+      hide("seekerMessage");
+      hide("endBtn");
+      stopGPS();
+    }else{
+      hide("finishedMessage");
+    }
+  });
+
+  // Receive Hunter and target GPS locations.
+  socket.on("hunter-locations",data=>{
+    if(myRole !== "hunter") return;
+
+    currentHunters = data.hunters || [];
+    currentTargets = data.targets || [];
+
+    renderTargets();
+  });
+
+  // Secret Spy information for Hunters.
+  socket.on("spy-intel",data=>{
+    if(myRole !== "hunter") return;
+
+    if(data && data.length){
+      $("intel").textContent =
+        "🕵️ Spy detected: " +
+        data.map(p=>p.name).join(", ");
+
+      show("intel");
+    }else{
+      $("intel").textContent =
+        "No Spy information available.";
+      show("intel");
+    }
+  });
+
+  // Server-side game errors.
+  socket.on("game-error",error=>{
+    $("lobbyHint").textContent =
+      typeof error === "string"
+        ? error
+        : "Unable to start the game.";
+  });
+
+  // General game messages.
+  socket.on("game-message",text=>{
+    $("finishedMessage").textContent = text;
+    show("finishedMessage");
+
+    setTimeout(()=>{
+      if($("finishedMessage").textContent === text &&
+         $("roleName").textContent !== ""){
+        if(myRole !== "" && $("finishedMessage").textContent !== "The game has ended."){
+          hide("finishedMessage");
+        }
+      }
+    },4000);
+  });
+
+  // Initial connection status.
+  socket.on("connect",()=>{
+    $("connectionStatus").textContent =
+      "Connected to game server.";
+  });
+
+  socket.on("connect_error",error=>{
+    console.error("Socket connection error:",error);
+    $("connectionStatus").textContent =
+      "Connection error: " + error.message;
+  });
+
+})();
+</script>
+</body>
+</html>
+
